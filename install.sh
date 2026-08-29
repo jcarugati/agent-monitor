@@ -107,6 +107,7 @@ systemd_escape() {
   value=${value//%/%%}
   value=${value//\\/\\\\}
   value=${value//\"/\\\"}
+  value=${value// /\\x20}
   printf '%s' "$value"
 }
 
@@ -114,11 +115,10 @@ escaped_root=$(systemd_escape "$SCRIPT_DIR")
 escaped_host=$(systemd_escape "$BIND_HOST")
 unit_content="[Unit]
 Description=Agent Monitor read-only local dashboard
-Documentation=\"file://$escaped_root/README.md\"
 
 [Service]
 Type=simple
-WorkingDirectory=\"$escaped_root\"
+WorkingDirectory=$escaped_root
 ExecStart=/usr/bin/python3 \"$escaped_root/server.py\" --host \"$escaped_host\" --port \"$PORT\" --codex-home \"%h/.codex\" --hermes-home \"%h/.hermes\" --proc-root /proc
 Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure

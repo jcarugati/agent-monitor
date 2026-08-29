@@ -65,7 +65,7 @@ class InstallerTests(unittest.TestCase):
         first = self.run_installer("--host", "127.0.0.2", "--port", "9123")
         self.assertEqual(first.returncode, 0, first.stderr)
         service = self.service_path().read_text(encoding="utf-8")
-        self.assertIn(f'WorkingDirectory="{ROOT}"', service)
+        self.assertIn(f"WorkingDirectory={ROOT}", service)
         self.assertIn(f'ExecStart=/usr/bin/python3 "{ROOT}/server.py" --host "127.0.0.2" --port "9123"', service)
         self.assertIn("--codex-home \"%h/.codex\" --hermes-home \"%h/.hermes\"", service)
         self.assertNotIn("0.0.0.0", service)
@@ -133,6 +133,57 @@ class InstallerTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("control characters", result.stderr)
                 self.assertNotIn("[Service]", result.stdout)
+
+    def test_generated_unit_passes_systemd_verify_for_escaped_checkout_path(self):
+        systemd_analyze = shutil.which("systemd-analyze")
+        if systemd_analyze is None:
+            self.skipTest("systemd-analyze is unavailable")
+
+        checkout = self.root / "checkout with space%value"
+        checkout.mkdir()
+        installer = checkout / "install.sh"
+        shutil.copy2(INSTALLER, installer)
+        shutil.copy2(ROOT / "server.py", checkout / "server.py")
+
+        env = os.environ.copy()
+        env.update(
+            {
+                "HOME": str(self.home),
+                "PATH": f"{self.bin}:{env['PATH']}",
+                "SYSTEMCTL_LOG": str(self.systemctl_log),
+            }
+        )
+        install = subprocess.run(
+            ["bash", str(installer)],
+            cwd=checkout,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(install.returncode, 0, install.stderr)
+
+        service = self.service_path().read_text(encoding="utf-8")
+        escaped_checkout = str(checkout).replace("%", "%%").replace(" ", r"\x20")
+        self.assertIn(f"WorkingDirectory={escaped_checkout}\n", service)
+        self.assertIn(
+            f'ExecStart=/usr/bin/python3 "{escaped_checkout}/server.py"',
+            service,
+        )
+        self.assertNotIn("Documentation=", service)
+
+        verify = subprocess.run(
+            [systemd_analyze, "--user", "verify", str(self.service_path())],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(
+            verify.returncode,
+            0,
+            f"stdout:\n{verify.stdout}\nstderr:\n{verify.stderr}",
+        )
 
     def test_help_documents_supported_options_without_writing(self):
         result = self.run_installer("--help")
