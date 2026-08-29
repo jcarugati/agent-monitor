@@ -18,6 +18,8 @@ class HttpTests(unittest.TestCase):
             '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>',
             encoding="utf-8",
         )
+        (self.static_root / "favicon-32x32.png").write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+        (self.static_root / "favicon.ico").write_bytes(b"\x00\x00\x01\x00fixture")
         self.snapshot = {"generated_at": "2026-08-29T12:00:00Z", "running_count": 0, "running_threads": [], "recent_count": 0, "recent_completions": []}
         self.server = create_server("127.0.0.1", 0, self.static_root, lambda: self.snapshot)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -74,6 +76,23 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(headers["X-Frame-Options"], "DENY")
         self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
         self.assertIn(b"<svg", body)
+
+    def test_raster_favicons_serve_with_explicit_types_cache_and_security_headers(self):
+        expectations = (
+            ("/favicon-32x32.png?v=2", "image/png", b"\x89PNG\r\n\x1a\n"),
+            ("/favicon.ico?v=2", "image/x-icon", b"\x00\x00\x01\x00"),
+        )
+
+        for path, content_type, signature in expectations:
+            with self.subTest(path=path):
+                status, headers, body = self.request("GET", path)
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["Content-Type"], content_type)
+                self.assertEqual(headers["Cache-Control"], "public, max-age=300")
+                self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+                self.assertEqual(headers["X-Frame-Options"], "DENY")
+                self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+                self.assertTrue(body.startswith(signature))
 
     def test_traversal_missing_routes_and_mutations_are_rejected(self):
         self.assertEqual(self.request("GET", "/%2e%2e/AGENTS.md")[0], 404)

@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 LOGGER = logging.getLogger(__name__)
 SnapshotProvider = Callable[[], dict]
+STATIC_MIME_TYPES = {".ico": "image/x-icon"}
 
 
 class MonitorServer(ThreadingHTTPServer):
@@ -96,7 +97,9 @@ def _handler_class(static_root: Path, snapshot_provider: SnapshotProvider):
             except OSError:
                 self._send_json(HTTPStatus.NOT_FOUND, {"error": "not found"}, head_only=head_only)
                 return
-            mime_type = mimetypes.guess_type(static_path.name)[0] or "application/octet-stream"
+            mime_type = STATIC_MIME_TYPES.get(static_path.suffix.lower())
+            if mime_type is None:
+                mime_type = mimetypes.guess_type(static_path.name)[0] or "application/octet-stream"
             if mime_type.startswith("text/") or mime_type in {"application/javascript", "application/json"}:
                 mime_type += "; charset=utf-8"
             cache = "no-cache" if static_path.name == "index.html" else "public, max-age=300"
