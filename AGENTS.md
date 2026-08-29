@@ -8,6 +8,7 @@
 
 - Monitoring only: never signal, stop, resume, mutate, or write into Codex/Hermes processes, `~/.codex`, or `~/.hermes`.
 - Treat `/proc` open rollout file descriptors as the source of truth for actually running Codex sessions. SQLite `inProgress` rows can be stale.
+- Do not add systemd mount-namespace isolation such as `PrivateTmp`, `ProtectHome`, or `ProtectSystem`; resolving peer-process procfs magic links is required for Codex liveness. Preserve GET-only APIs, SQLite `mode=ro`, and the rule against writing provider data.
 - Treat unexpired Hermes `session_turn_leases` owned by a live Hermes PID as the source of truth for actually running Hermes turns. `sessions.ended_at IS NULL` can be stale.
 - Open Codex and Hermes SQLite databases read-only.
 - Do not expose developer/system messages, reasoning, full prompts, raw command output, secrets, environment variables, or full command lines through the API.

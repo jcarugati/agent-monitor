@@ -55,6 +55,8 @@ Useful options:
 
 The installer is idempotent. The distributable template at [`deploy/agent-monitor.service`](deploy/agent-monitor.service) uses generic `%h` placeholders for manual setups.
 
+The service intentionally does not use systemd mount-namespace isolation such as `PrivateTmp`, `ProtectHome`, or `ProtectSystem`. Codex liveness requires resolving peer-process `/proc/<pid>/exe`, `/proc/<pid>/cwd`, and `/proc/<pid>/fd/*` magic links; those directives make the links inaccessible to the monitor. The unit retains non-namespace hardening including `NoNewPrivileges`, restricted address families, a private umask, and its restart policy. The application boundary remains read-only: the API is GET-only, provider SQLite databases are opened with `mode=ro`, and provider data is never written.
+
 ## Tailscale access
 
 To make the dashboard reachable only on this machine's Tailscale IPv4 address:
