@@ -14,6 +14,10 @@ class HttpTests(unittest.TestCase):
         self.static_root = Path(self.temp.name)
         (self.static_root / "index.html").write_text("<!doctype html><title>Monitor</title>", encoding="utf-8")
         (self.static_root / "app.js").write_text("console.log('monitor');", encoding="utf-8")
+        (self.static_root / "favicon.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>',
+            encoding="utf-8",
+        )
         self.snapshot = {"generated_at": "2026-08-29T12:00:00Z", "running_count": 0, "running_threads": [], "recent_count": 0, "recent_completions": []}
         self.server = create_server("127.0.0.1", 0, self.static_root, lambda: self.snapshot)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -59,6 +63,17 @@ class HttpTests(unittest.TestCase):
         self.assertIn(b"console.log", asset_body)
         self.assertEqual(index_headers["Cache-Control"], "no-cache")
         self.assertEqual(asset_headers["Cache-Control"], "public, max-age=300")
+
+    def test_svg_favicon_serves_with_asset_cache_and_security_headers(self):
+        status, headers, body = self.request("GET", "/favicon.svg?v=1")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "image/svg+xml")
+        self.assertEqual(headers["Cache-Control"], "public, max-age=300")
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
+        self.assertIn("default-src 'self'", headers["Content-Security-Policy"])
+        self.assertIn(b"<svg", body)
 
     def test_traversal_missing_routes_and_mutations_are_rejected(self):
         self.assertEqual(self.request("GET", "/%2e%2e/AGENTS.md")[0], 404)

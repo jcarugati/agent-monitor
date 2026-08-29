@@ -1,8 +1,22 @@
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlsplit
+from xml.etree import ElementTree
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _IconLinkParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.icons = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "link" and attributes.get("rel") == "icon":
+            self.icons.append(attributes)
 
 
 class FrontendContractTests(unittest.TestCase):
@@ -13,12 +27,38 @@ class FrontendContractTests(unittest.TestCase):
             'id="auto-refresh"', 'role="switch"', 'id="active-list"',
             'id="recent-list"', 'aria-live="polite"', "Agent Monitor",
             "Codex + Hermes", 'id="active-loading"', 'id="recent-loading"',
-            'data-mobile-layout="cards"', 'rel="icon" href="data:,"',
+            'data-mobile-layout="cards"',
         ):
             self.assertIn(required, html)
         lowered = html.lower()
         for forbidden in (">stop<", ">kill<", ">resume<", "gradient", "indigo"):
             self.assertNotIn(forbidden, lowered)
+
+    def test_html_references_a_self_contained_svg_favicon(self):
+        html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
+        parser = _IconLinkParser()
+        parser.feed(html)
+
+        self.assertNotIn("data:,", html)
+        self.assertEqual(len(parser.icons), 1)
+        icon = parser.icons[0]
+        self.assertEqual(icon.get("type"), "image/svg+xml")
+        href = icon.get("href", "")
+        parsed_href = urlsplit(href)
+        self.assertEqual(parsed_href.path, "/favicon.svg")
+        self.assertTrue(parsed_href.query)
+
+        favicon_path = ROOT / "frontend" / parsed_href.path.lstrip("/")
+        self.assertTrue(favicon_path.is_file())
+        root = ElementTree.parse(favicon_path).getroot()
+        view_box = root.attrib.get("viewBox", "").split()
+        self.assertEqual(root.tag, "{http://www.w3.org/2000/svg}svg")
+        self.assertEqual(len(view_box), 4)
+        self.assertEqual(view_box[2], view_box[3])
+
+        svg = favicon_path.read_text(encoding="utf-8").lower()
+        for forbidden in ("<script", "<text", "gradient", "data:", "base64", "href="):
+            self.assertNotIn(forbidden, svg)
 
     def test_javascript_polls_safely_persists_preference_and_uses_safe_dom_apis(self):
         source = (ROOT / "frontend/app.js").read_text(encoding="utf-8")
