@@ -1,0 +1,20 @@
+[Unit]
+Description=Agent Monitor read-only local dashboard
+Documentation=file://%h/path/to/agent-monitor/README.md
+
+[Service]
+Type=simple
+WorkingDirectory=%h/path/to/agent-monitor
+ExecStart=/usr/bin/python3 %h/path/to/agent-monitor/server.py --host 127.0.0.1 --port 8777 --codex-home %h/.codex --hermes-home %h/.hermes --proc-root /proc
+Environment=PYTHONDONTWRITEBYTECODE=1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+
+[Install]
+WantedBy=default.target
