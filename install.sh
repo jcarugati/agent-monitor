@@ -124,9 +124,6 @@ Environment=PYTHONDONTWRITEBYTECODE=1
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 UMask=0077
 

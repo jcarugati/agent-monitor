@@ -14,4 +14,6 @@ Security fixes target the latest revision on the default branch. Older snapshots
 
 Agent Monitor is a read-only observability tool, not an authentication proxy. It binds to `127.0.0.1` by default. Operators who bind a non-loopback address are responsible for access control at the network layer.
 
+The systemd service intentionally avoids mount-namespace isolation (`PrivateTmp`, `ProtectHome`, and `ProtectSystem`) because it must resolve peer-process procfs magic links to establish Codex liveness. Non-mount-namespace hardening remains enabled. This does not change the application security boundary: the API is GET-only, SQLite databases are opened with `mode=ro`, and Agent Monitor never writes provider data or controls provider processes.
+
 The project's core security contract is documented in the README. Changes that add process control, mutation endpoints, writable database access, prompt exposure, raw output exposure, or implicit wildcard network binding are out of scope and should be rejected.

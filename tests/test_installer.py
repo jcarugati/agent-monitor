@@ -8,6 +8,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / "install.sh"
+SERVICE_TEMPLATE = ROOT / "deploy/agent-monitor.service"
+
+# Each directive creates a mount namespace that makes peer-process /proc magic
+# links unreadable. Codex liveness depends on resolving those links.
+PEER_PROCFS_INCOMPATIBLE_DIRECTIVES = (
+    "PrivateTmp",
+    "ProtectHome",
+    "ProtectSystem",
+)
+REQUIRED_NON_NAMESPACE_HARDENING = (
+    "NoNewPrivileges=true",
+    "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+    "UMask=0077",
+    "Restart=on-failure",
+    "RestartSec=3",
+)
 
 
 class InstallerTests(unittest.TestCase):
@@ -53,6 +69,21 @@ class InstallerTests(unittest.TestCase):
     def service_path(self):
         return self.home / ".config/systemd/user/agent-monitor.service"
 
+    def assert_peer_procfs_magic_links_remain_accessible(self, service):
+        configured_directives = {
+            line.partition("=")[0].strip()
+            for line in service.splitlines()
+            if "=" in line and not line.lstrip().startswith(("#", ";"))
+        }
+        for directive in PEER_PROCFS_INCOMPATIBLE_DIRECTIVES:
+            with self.subTest(directive=directive):
+                self.assertNotIn(directive, configured_directives)
+
+    def assert_non_namespace_hardening_is_preserved(self, service):
+        for directive in REQUIRED_NON_NAMESPACE_HARDENING:
+            with self.subTest(directive=directive):
+                self.assertIn(directive, service)
+
     def test_dry_run_uses_loopback_and_makes_no_changes(self):
         result = self.run_installer("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -77,6 +108,24 @@ class InstallerTests(unittest.TestCase):
         calls = self.systemctl_log.read_text(encoding="utf-8").splitlines()
         self.assertEqual(calls.count("--user daemon-reload"), 2)
         self.assertEqual(calls.count("--user enable --now agent-monitor.service"), 2)
+
+    def test_generated_unit_avoids_mount_namespaces_that_block_required_procfs_magic_links(self):
+        result = self.run_installer("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_peer_procfs_magic_links_remain_accessible(result.stdout)
+
+    def test_template_unit_avoids_mount_namespaces_that_block_required_procfs_magic_links(self):
+        service = SERVICE_TEMPLATE.read_text(encoding="utf-8")
+        self.assert_peer_procfs_magic_links_remain_accessible(service)
+
+    def test_generated_unit_preserves_non_namespace_hardening(self):
+        result = self.run_installer("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_non_namespace_hardening_is_preserved(result.stdout)
+
+    def test_template_unit_preserves_non_namespace_hardening(self):
+        service = SERVICE_TEMPLATE.read_text(encoding="utf-8")
+        self.assert_non_namespace_hardening_is_preserved(service)
 
     def test_tailscale_binds_only_detected_ipv4(self):
         self._command("tailscale", "#!/usr/bin/env bash\nprintf '%s\\n' '192.0.2.10'\n")
