@@ -18,6 +18,12 @@ const elements = {
   recentList: document.querySelector("#recent-list"),
   recentLoading: document.querySelector("#recent-loading"),
   recentEmpty: document.querySelector("#recent-empty"),
+  detailDialog: document.querySelector("#session-dialog"),
+  detailClose: document.querySelector("#detail-close"),
+  detailKicker: document.querySelector("#detail-kicker"),
+  detailTitle: document.querySelector("#detail-title"),
+  detailDescription: document.querySelector("#detail-description"),
+  detailContent: document.querySelector("#detail-content"),
 };
 
 const storedPreference = localStorage.getItem(AUTO_REFRESH_KEY);
@@ -27,6 +33,9 @@ const state = {
   controller: null,
   timer: null,
   autoRefresh: storedPreference !== "false",
+  selectedDetail: null,
+  detailTrigger: null,
+  restoreDetailFocus: true,
 };
 
 function node(tag, className, text) {
@@ -63,15 +72,35 @@ function ageFromTimestamp(timestamp) {
   return Math.max(0, (Date.now() - milliseconds) / 1000);
 }
 
-function shortId(value) {
-  if (typeof value !== "string") return "unknown";
-  const identifier = value.split(":").at(-1) || value;
-  return identifier.slice(0, 8);
+function timestampNode(value) {
+  if (!value) return node("span", "detail-missing", "—");
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return node("span", "detail-missing", "—");
+  const time = node("time", "detail-time", date.toLocaleString([], {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }));
+  time.dateTime = date.toISOString();
+  return time;
 }
 
 function providerInfo(provider) {
-  if (provider === "hermes") return { label: "Hermes", live: "Active turn", mode: "Agent turn" };
-  return { label: "Codex", live: "Live process", mode: "Default effort" };
+  if (provider === "hermes") {
+    return { key: "hermes", label: "Hermes", live: "Active turn", mode: "Agent turn" };
+  }
+  return { key: "codex", label: "Codex", live: "Live process", mode: "Default effort" };
+}
+
+function detailKey(kind, item) {
+  return { kind, id: String(item.id || "unknown") };
+}
+
+function isSelected(kind, item) {
+  return Boolean(
+    state.selectedDetail
+    && state.selectedDetail.kind === kind
+    && state.selectedDetail.id === String(item.id || "unknown")
+  );
 }
 
 function setConnection(status, label) {
@@ -82,7 +111,9 @@ function setConnection(status, label) {
 function setBusy(busy) {
   elements.refreshButton.disabled = busy;
   elements.refreshButton.setAttribute("aria-busy", String(busy));
-  elements.activeList.setAttribute("aria-busy", String(busy && !state.snapshot));
+  const firstLoad = busy && !state.snapshot;
+  elements.activeList.setAttribute("aria-busy", String(firstLoad));
+  elements.recentList.setAttribute("aria-busy", String(firstLoad));
 }
 
 function setAutoRefresh(enabled, persist = true) {
@@ -95,12 +126,6 @@ function setAutoRefresh(enabled, persist = true) {
   }
 }
 
-function fact(label, value) {
-  const wrapper = node("div");
-  wrapper.append(node("dt", "fact-label", label), node("dd", "fact-value", value));
-  return wrapper;
-}
-
 function activityDescription(item) {
   const fragment = document.createDocumentFragment();
   if (item.type === "message") {
@@ -110,7 +135,9 @@ function activityDescription(item) {
   if (item.type === "command") {
     fragment.append(node("strong", "", item.label || "command"));
     const result = item.result || item.status;
-    if (result) fragment.append(node("span", `result-tag ${result === "failed" ? "failed" : ""}`, result));
+    if (result) {
+      fragment.append(node("span", `result-tag ${result === "failed" ? "failed" : ""}`, result));
+    }
     return fragment;
   }
   const count = Number.isFinite(item.count) ? item.count : 0;
@@ -127,7 +154,10 @@ function renderActivity(activity) {
   if (!items.length) {
     const empty = node("li", "activity-item");
     empty.dataset.kind = "empty";
-    empty.append(node("span", "activity-dot"), node("span", "activity-copy", "No safe projected activity yet"));
+    empty.append(
+      node("span", "activity-dot"),
+      node("span", "activity-copy", "No safe projected activity yet"),
+    );
     list.append(empty);
     return list;
   }
@@ -145,102 +175,184 @@ function renderActivity(activity) {
   return list;
 }
 
-function renderThread(thread) {
-  const article = node("article", "thread-row");
-  article.setAttribute("aria-labelledby", `thread-${thread.id}`);
+function cardContext(kind, item) {
+  if (kind === "running") return item.latest_summary || "Waiting for projected activity";
+  const provider = providerInfo(item.provider);
+  return `${item.model || "Unknown model"} · ${item.reasoning_effort || provider.mode}`;
+}
 
-  const head = node("div", "thread-head");
-  const identity = node("div");
-  const provider = providerInfo(thread.provider);
-  article.dataset.provider = thread.provider || "codex";
-  const live = node("span", "live-label");
-  live.append(
+function cardMetrics(kind, item) {
+  if (kind === "running") {
+    return [
+      `Elapsed ${formatDuration(item.elapsed_seconds)}`,
+      `Updated ${formatAge(item.last_activity_age_seconds)}`,
+    ];
+  }
+  return [`Updated ${formatAge(ageFromTimestamp(item.updated_at))}`];
+}
+
+function renderCard(kind, item) {
+  const row = node("article", "kanban-item");
+  row.setAttribute("role", "listitem");
+  const provider = providerInfo(item.provider);
+  row.dataset.provider = provider.key;
+  row.dataset.state = kind;
+
+  const button = node("button", "kanban-card");
+  button.type = "button";
+  button.dataset.sessionId = String(item.id || "unknown");
+  button.dataset.sessionKind = kind;
+
+  const status = node("span", "card-status");
+  status.append(
     node("span", "status-dot"),
-    node("span", `provider-badge provider-${thread.provider || "codex"}`, provider.label),
-    document.createTextNode(provider.live),
+    node("span", `provider-badge provider-${provider.key}`, provider.label),
+    node("span", "state-label", kind === "running" ? provider.live : "Recent session"),
   );
-  const heading = node("h3", "", thread.title || "Untitled session");
-  heading.id = `thread-${thread.id}`;
-  const project = node("div", "thread-project");
-  project.append(
-    node("span", "project-name", thread.project_name || "Unknown project"),
-    node("span", "separator", "/"),
-    node("span", "branch-name", thread.branch || "No branch"),
-  );
-  identity.append(live, heading, project);
-  const elapsed = node("div", "elapsed-block");
-  elapsed.append(node("span", "elapsed-label", "Elapsed"), node("span", "elapsed-value", formatDuration(thread.elapsed_seconds)));
-  head.append(identity, elapsed);
 
-  const body = node("div", "thread-body");
-  const overview = node("div", "thread-overview");
-  overview.append(node("p", "latest-label", "Latest safe summary"), node("p", "latest-summary", thread.latest_summary || "Waiting for projected activity"));
-  const facts = node("dl", "thread-facts");
+  const title = node("span", "card-title", item.title || "Untitled session");
+  const project = node("span", "card-project", item.project_name || "Unknown project");
+  const context = node("span", "card-context", cardContext(kind, item));
+  const footer = node("span", "card-footer");
+  const metrics = node("span", "card-metrics");
+  for (const metric of cardMetrics(kind, item)) metrics.append(node("span", "", metric));
+  footer.append(metrics, node("span", "card-affordance", "View details"));
+  button.append(status, title, project, context, footer);
+
+  button.addEventListener("click", () => openDetail(kind, item, button));
+  if (isSelected(kind, item)) state.detailTrigger = button;
+  row.append(button);
+  return row;
+}
+
+function detailFact(label, value, options = {}) {
+  const wrapper = node("div", "detail-fact");
+  const term = node("dt", "detail-label", label);
+  const description = node("dd", options.mono ? "detail-value detail-mono" : "detail-value");
+  if (options.timestamp) {
+    description.append(timestampNode(value));
+  } else {
+    description.textContent = value === undefined || value === null || value === "" ? "—" : String(value);
+  }
+  wrapper.append(term, description);
+  return wrapper;
+}
+
+function renderDetail(kind, item) {
+  const provider = providerInfo(item.provider);
+  const status = kind === "running" ? provider.live : "Recent session";
+  elements.detailDialog.dataset.provider = provider.key;
+  elements.detailKicker.textContent = `${provider.label} · ${status}`;
+  elements.detailTitle.textContent = item.title || "Untitled session";
+  elements.detailDescription.textContent = kind === "running"
+    ? (item.latest_summary || "Waiting for projected activity")
+    : cardContext(kind, item);
+
+  const facts = node("dl", "detail-facts");
   facts.append(
-    fact("Model", thread.model || "Unknown model"),
-    fact(thread.provider === "hermes" ? "Mode" : "Effort", thread.reasoning_effort || provider.mode),
-    fact("Last activity", formatAge(thread.last_activity_age_seconds)),
+    detailFact("Status", status),
+    detailFact("Provider", provider.label),
+    detailFact("Project", item.project_name || "Unknown project"),
   );
-  const footer = node("div", "thread-footer");
-  footer.append(node("span", "thread-path", thread.cwd || "Unknown cwd"), node("span", "thread-id", `${shortId(thread.id)} · pid ${thread.pid}`));
-  overview.append(facts, footer);
 
-  const timeline = node("details", "timeline-panel");
-  timeline.setAttribute("aria-label", "Recent safe activity");
-  const isCompactViewport = window.matchMedia("(max-width: 640px)").matches;
-  timeline.open = !isCompactViewport;
-  const timelineTitle = node("summary", "timeline-title");
-  timelineTitle.append(
-    node("span", "timeline-heading", "Recent activity"),
-    node("span", "timeline-order", "Newest first"),
+  if (kind === "running") {
+    facts.append(
+      detailFact("Elapsed", formatDuration(item.elapsed_seconds), { mono: true }),
+      detailFact("Last activity", formatAge(item.last_activity_age_seconds), { mono: true }),
+    );
+  } else {
+    facts.append(detailFact("Updated age", formatAge(ageFromTimestamp(item.updated_at)), { mono: true }));
+  }
+
+  facts.append(
+    detailFact("Model", item.model || "Unknown model", { mono: true }),
+    detailFact(item.provider === "hermes" ? "Mode" : "Reasoning effort", item.reasoning_effort || provider.mode, { mono: true }),
+    detailFact("Branch", item.branch || "No branch", { mono: true }),
+    detailFact("Working directory", item.cwd || "Unknown cwd", { mono: true }),
+    detailFact("Session ID", item.id || "Unknown", { mono: true }),
   );
-  timeline.append(timelineTitle, renderActivity(thread.activity));
-  body.append(overview, timeline);
-  article.append(head, body);
-  return article;
+
+  if (kind === "running") {
+    facts.append(
+      detailFact("PID", item.pid, { mono: true }),
+      detailFact("Started", item.started_at, { timestamp: true }),
+      detailFact("Updated", item.updated_at, { timestamp: true }),
+    );
+  } else {
+    facts.append(
+      detailFact("Created", item.created_at, { timestamp: true }),
+      detailFact("Updated", item.updated_at, { timestamp: true }),
+    );
+  }
+
+  const content = document.createDocumentFragment();
+  content.append(facts);
+  if (kind === "running") {
+    const activitySection = node("section", "detail-activity");
+    const activityHeading = node("div", "detail-section-heading");
+    activityHeading.append(
+      node("h3", "", "Recent safe activity"),
+      node("span", "", "Newest first · max 8"),
+    );
+    activitySection.append(activityHeading, renderActivity(item.activity));
+    content.append(activitySection);
+  }
+  elements.detailContent.replaceChildren(content);
+}
+
+function openDetail(kind, item, trigger) {
+  state.selectedDetail = detailKey(kind, item);
+  state.detailTrigger = trigger;
+  state.restoreDetailFocus = true;
+  renderDetail(kind, item);
+  elements.detailDialog.showModal();
+}
+
+function closeDetail() {
+  if (elements.detailDialog.open) elements.detailDialog.close();
+}
+
+function findSelectedItem(threads, recent) {
+  if (!state.selectedDetail) return null;
+  const collection = state.selectedDetail.kind === "running" ? threads : recent;
+  return collection.find((item) => String(item.id || "unknown") === state.selectedDetail.id) || null;
+}
+
+function refreshSelectedDetail(threads, recent) {
+  if (!state.selectedDetail || !elements.detailDialog.open) return;
+  const latest = findSelectedItem(threads, recent);
+  if (latest) {
+    renderDetail(state.selectedDetail.kind, latest);
+    return;
+  }
+  state.restoreDetailFocus = false;
+  closeDetail();
 }
 
 function renderRecent(items) {
   const fragment = document.createDocumentFragment();
-  const labels = ["Source", "Project", "Task", "Branch", "Model", "Last update"];
-  for (const item of items.slice(0, 8)) {
-    const row = node("tr");
-    const updatedAge = ageFromTimestamp(item.updated_at);
-    const provider = providerInfo(item.provider);
-    row.dataset.provider = item.provider || "codex";
-    const cells = [
-      node("td", "recent-source", provider.label),
-      node("td", "recent-project", item.project_name || "Unknown project"),
-      node("td", "recent-task", item.title || "Untitled session"),
-      node("td", "branch-name", item.branch || "No branch"),
-      node("td", "", `${item.model || "Unknown"} · ${item.reasoning_effort || "default"}`),
-      node("td", "recent-time", formatAge(updatedAge)),
-    ];
-    cells.forEach((cell, index) => {
-      cell.dataset.label = labels[index];
-    });
-    row.append(...cells);
-    fragment.append(row);
-  }
+  for (const item of items.slice(0, 8)) fragment.append(renderCard("recent", item));
   elements.recentList.replaceChildren(fragment);
   elements.recentEmpty.hidden = items.length > 0;
 }
 
 function render(snapshot) {
   const threads = Array.isArray(snapshot.running_threads) ? snapshot.running_threads : [];
-  const recent = Array.isArray(snapshot.recent_completions) ? snapshot.recent_completions : [];
+  const recent = Array.isArray(snapshot.recent_completions) ? snapshot.recent_completions.slice(0, 8) : [];
   elements.activeCount.textContent = String(Number.isFinite(snapshot.running_count) ? snapshot.running_count : threads.length);
   const elapsedValues = threads.map((thread) => thread.elapsed_seconds).filter(Number.isFinite);
   elements.longestElapsed.textContent = elapsedValues.length ? formatDuration(Math.max(...elapsedValues)) : "—";
   elements.recentCount.textContent = String(Number.isFinite(snapshot.recent_count) ? snapshot.recent_count : recent.length);
 
+  if (state.selectedDetail) state.detailTrigger = null;
   const fragment = document.createDocumentFragment();
-  for (const thread of threads) fragment.append(renderThread(thread));
+  for (const thread of threads) fragment.append(renderCard("running", thread));
   elements.activeList.replaceChildren(fragment);
   elements.activeLoading.hidden = true;
   elements.activeEmpty.hidden = threads.length > 0;
   elements.recentLoading.hidden = true;
   renderRecent(recent);
+  refreshSelectedDetail(threads, recent);
 }
 
 async function loadSnapshot() {
@@ -262,7 +374,11 @@ async function loadSnapshot() {
       render(snapshot);
       const refreshed = new Date();
       elements.lastRefresh.dateTime = refreshed.toISOString();
-      elements.lastRefresh.textContent = refreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      elements.lastRefresh.textContent = refreshed.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
       setConnection("connected", "Live");
       return snapshot;
     } catch (error) {
@@ -270,7 +386,7 @@ async function loadSnapshot() {
       setConnection(state.snapshot ? "stale" : "disconnected", state.snapshot ? "Stale data" : "Disconnected");
       if (!state.snapshot) {
         elements.activeLoading.querySelector("p").textContent = "Live threads are unavailable. Use Refresh to try again.";
-        elements.recentLoading.textContent = "Recent sessions are unavailable. Use Refresh to try again.";
+        elements.recentLoading.querySelector("p").textContent = "Recent sessions are unavailable. Use Refresh to try again.";
       }
       return state.snapshot;
     } finally {
@@ -295,6 +411,26 @@ function scheduleNext() {
     scheduleNext();
   }, POLL_INTERVAL_MS);
 }
+
+elements.detailClose.addEventListener("click", closeDetail);
+
+elements.detailDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeDetail();
+});
+
+elements.detailDialog.addEventListener("click", (event) => {
+  if (event.target === elements.detailDialog) closeDetail();
+});
+
+elements.detailDialog.addEventListener("close", () => {
+  const trigger = state.detailTrigger;
+  const restoreFocus = state.restoreDetailFocus;
+  state.selectedDetail = null;
+  state.detailTrigger = null;
+  state.restoreDetailFocus = true;
+  if (restoreFocus && trigger && trigger.isConnected) trigger.focus();
+});
 
 elements.refreshButton.addEventListener("click", async () => {
   await loadSnapshot();
