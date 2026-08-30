@@ -22,19 +22,39 @@ class _IconLinkParser(HTMLParser):
 
 
 class FrontendContractTests(unittest.TestCase):
-    def test_html_has_semantic_monitor_regions_and_only_real_controls(self):
+    def test_html_has_two_column_read_only_kanban_and_only_real_controls(self):
         html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
         for required in (
             "<header", "<main", "<section", "<footer", 'id="refresh-button"',
             'id="auto-refresh"', 'role="switch"', 'id="active-list"',
             'id="recent-list"', 'aria-live="polite"', "Agent Monitor",
             "Codex + Hermes", 'id="active-loading"', 'id="recent-loading"',
-            'data-mobile-layout="cards"',
+            'class="kanban-board"', 'data-column="running"',
+            'data-column="recent"', "Running", "Recent", "Read-only",
         ):
             self.assertIn(required, html)
+        self.assertEqual(html.count('class="kanban-column"'), 2)
+        self.assertNotIn("<table", html)
         lowered = html.lower()
-        for forbidden in (">stop<", ">kill<", ">resume<", "gradient", "indigo"):
+        for forbidden in (
+            ">stop<", ">kill<", ">resume<", "drag", "drop", "gradient", "indigo",
+        ):
             self.assertNotIn(forbidden, lowered)
+
+    def test_html_has_native_accessible_detail_dialog_and_cache_busted_assets(self):
+        html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
+        for required in (
+            '<dialog class="detail-dialog" id="session-dialog"',
+            'aria-labelledby="detail-title"',
+            'aria-describedby="detail-description"',
+            'id="detail-title"',
+            'id="detail-description"',
+            'id="detail-content"',
+            '<button class="detail-close" id="detail-close" type="button">Close</button>',
+        ):
+            self.assertIn(required, html)
+        self.assertRegex(html, r'href="/styles\.css\?v=[^"]+"')
+        self.assertRegex(html, r'src="/app\.js\?v=[^"]+"')
 
     def test_html_references_explicit_raster_favicon_fallbacks(self):
         html = (ROOT / "frontend/index.html").read_text(encoding="utf-8")
@@ -125,45 +145,54 @@ class FrontendContractTests(unittest.TestCase):
         for required in (
             'fetch("/api/snapshot"', "AbortController", "localStorage.getItem",
             "localStorage.setItem", "30000", "POLL_INTERVAL_MS", "textContent", "aria-checked",
-            "state.inFlight", "scheduleNext", "thread.provider", "provider-badge",
-            'cell.dataset.label', 'row.dataset.provider', '"Source"', '"Project"',
-            '"Task"', '"Branch"', '"Model"', '"Last update"',
+            "state.inFlight", "scheduleNext", "item.provider", "provider-badge",
+            'node("button", "kanban-card")', 'button.type = "button"',
+            'button.addEventListener("click"', '"View details"',
+            "items.slice(0, 8)", 'row.dataset.provider',
         ):
             self.assertIn(required, source)
         self.assertNotIn(".innerHTML", source)
         self.assertNotIn("setInterval", source)
 
-    def test_css_has_responsive_focus_mobile_targets_and_reduced_motion(self):
+    def test_javascript_dialog_closes_accessibly_and_tracks_polled_selection(self):
+        source = (ROOT / "frontend/app.js").read_text(encoding="utf-8")
+        for required in (
+            "selectedDetail:", "detailTrigger:", "showModal()", "closeDetail",
+            'elements.detailClose.addEventListener("click"',
+            'elements.detailDialog.addEventListener("cancel"',
+            'elements.detailDialog.addEventListener("click"',
+            "event.target === elements.detailDialog",
+            'elements.detailDialog.addEventListener("close"',
+            "trigger.isConnected", "trigger.focus()",
+            "refreshSelectedDetail", "renderDetail",
+        ):
+            self.assertIn(required, source)
+
+    def test_css_has_compact_cards_focus_targets_and_reduced_motion(self):
         css = (ROOT / "frontend/styles.css").read_text(encoding="utf-8")
         for required in (
             ":focus-visible", "@media (max-width:", "min-height: 44px",
             "prefers-reduced-motion", "--live:", "--warning:", "--danger:",
-            'content: attr(data-label)', "overflow-wrap: anywhere",
-            '.recent-table-wrap[data-mobile-layout="cards"]',
-            "grid-template-columns: minmax(0, 1fr)",
+            "overflow-wrap: anywhere", ".kanban-card", ".card-title",
+            "-webkit-line-clamp: 2", ".detail-dialog", ".detail-facts",
+            ".activity-list", "dialog::backdrop",
         ):
             self.assertIn(required, css)
         self.assertNotIn("linear-gradient", css)
         self.assertNotIn("radial-gradient", css)
 
-    def test_live_threads_use_responsive_activity_disclosure_and_compact_mobile_facts(self):
-        source = (ROOT / "frontend/app.js").read_text(encoding="utf-8")
-        for required in (
-            'node("details", "timeline-panel")',
-            'node("summary", "timeline-title")',
-            'window.matchMedia("(max-width: 640px)").matches',
-            "timeline.open = !isCompactViewport",
-            '"Recent activity"',
-        ):
-            self.assertIn(required, source)
-
+    def test_css_balances_columns_then_stacks_without_mobile_overflow(self):
         css = (ROOT / "frontend/styles.css").read_text(encoding="utf-8")
+        self.assertIn(".kanban-board", css)
+        board = css.split(".kanban-board", 1)[1].split("}", 1)[0]
+        self.assertIn("grid-template-columns: repeat(2, minmax(0, 1fr));", board)
         mobile = css.split("@media (max-width: 640px)", 1)[1].split(
             "@media (prefers-reduced-motion", 1
         )[0]
-        self.assertIn("grid-template-columns: repeat(3, minmax(0, 1fr));", mobile)
-        self.assertIn(".timeline-title", mobile)
-        self.assertIn("min-height: 44px", mobile)
+        mobile_board = mobile.split(".kanban-board", 1)[1].split("}", 1)[0]
+        self.assertIn("grid-template-columns: 1fr;", mobile_board)
+        self.assertNotIn("overflow-x: auto", mobile)
+        self.assertIn("max-width: calc(100vw - 28px)", mobile)
         self.assertIn("overflow-wrap: anywhere", mobile)
 
 

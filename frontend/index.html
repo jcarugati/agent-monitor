@@ -9,11 +9,11 @@
     <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=2">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=2">
     <link rel="shortcut icon" type="image/x-icon" sizes="16x16 32x32" href="/favicon.ico?v=2">
-    <link rel="stylesheet" href="/styles.css">
-    <script src="/app.js?v=agents" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=kanban-1">
+    <script src="/app.js?v=kanban-1" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#active-threads">Skip to active threads</a>
+    <a class="skip-link" href="#status-board">Skip to session status board</a>
     <div class="shell">
       <header class="app-header">
         <div class="brand-lockup">
@@ -63,55 +63,57 @@
           <p class="truth-note"><span aria-hidden="true"></span>Codex + Hermes · verified live work only</p>
         </section>
 
-        <section class="active-section" id="active-threads" aria-labelledby="active-heading">
-          <div class="section-heading">
+        <section class="board-section" id="status-board" aria-labelledby="status-board-heading" aria-describedby="board-description">
+          <div class="board-heading">
             <div>
-              <p class="section-index">01 / Live work</p>
-              <h2 id="active-heading">Running threads</h2>
+              <p class="section-index">Read-only / Status</p>
+              <h2 id="status-board-heading">Session kanban</h2>
             </div>
-            <p id="active-description">Native Codex rollouts and active Hermes turn leases.</p>
+            <p id="board-description">A compact Kanban-style status view. Cards open details; nothing can be moved or changed.</p>
           </div>
 
-          <div class="thread-list" id="active-list" aria-live="polite" aria-busy="true"></div>
+          <div class="kanban-board">
+            <section class="kanban-column" id="active-threads" data-column="running" aria-labelledby="active-heading">
+              <header class="column-heading">
+                <div>
+                  <p class="section-index">01 / Verified live</p>
+                  <h3 id="active-heading">Running</h3>
+                </div>
+                <span class="column-state running-state">Live</span>
+              </header>
 
-          <div class="loading-state" id="active-loading" role="status">
-            <span class="loading-indicator" aria-hidden="true"></span>
-            <p>Loading verified live threads…</p>
-          </div>
+              <div class="card-list" id="active-list" role="list" aria-live="polite" aria-busy="true"></div>
 
-          <div class="empty-state" id="active-empty" hidden>
-            <span class="empty-glyph" aria-hidden="true"></span>
-            <div>
-              <h3>No agent threads are running</h3>
-              <p>This view updates when Codex opens a rollout or Hermes acquires a live turn lease.</p>
-            </div>
-          </div>
-        </section>
+              <div class="loading-state" id="active-loading" role="status">
+                <span class="loading-indicator" aria-hidden="true"></span>
+                <p>Loading verified live threads…</p>
+              </div>
 
-        <section class="recent-section" aria-labelledby="recent-heading">
-          <div class="section-heading compact">
-            <div>
-              <p class="section-index">02 / Context</p>
-              <h2 id="recent-heading">Recent sessions</h2>
-            </div>
-            <p>Latest inactive projections, bounded to eight.</p>
-          </div>
-          <div class="recent-table-wrap" data-mobile-layout="cards">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Source</th>
-                  <th scope="col">Project</th>
-                  <th scope="col">Task</th>
-                  <th scope="col">Branch</th>
-                  <th scope="col">Model</th>
-                  <th scope="col">Last update</th>
-                </tr>
-              </thead>
-              <tbody id="recent-list" aria-live="polite"></tbody>
-            </table>
-            <p class="loading-state recent-loading" id="recent-loading" role="status">Loading recent session metadata…</p>
-            <p class="recent-empty" id="recent-empty" hidden>No recent session metadata is available.</p>
+              <div class="empty-state" id="active-empty" hidden>
+                <span class="empty-glyph" aria-hidden="true"></span>
+                <div>
+                  <h4>No agent threads are running</h4>
+                  <p>This column updates when Codex opens a rollout or Hermes acquires a live turn lease.</p>
+                </div>
+              </div>
+            </section>
+
+            <section class="kanban-column" data-column="recent" aria-labelledby="recent-heading">
+              <header class="column-heading">
+                <div>
+                  <p class="section-index">02 / Inactive context</p>
+                  <h3 id="recent-heading">Recent</h3>
+                </div>
+                <span class="column-state">Max 8</span>
+              </header>
+
+              <div class="card-list" id="recent-list" role="list" aria-live="polite" aria-busy="true"></div>
+              <div class="loading-state" id="recent-loading" role="status">
+                <span class="loading-indicator" aria-hidden="true"></span>
+                <p>Loading recent session metadata…</p>
+              </div>
+              <p class="recent-empty empty-state" id="recent-empty" hidden>No recent session metadata is available.</p>
+            </section>
           </div>
         </section>
       </main>
@@ -121,5 +123,19 @@
         <p class="footer-code">Tailscale · GET only</p>
       </footer>
     </div>
+
+    <dialog class="detail-dialog" id="session-dialog" aria-labelledby="detail-title" aria-describedby="detail-description">
+      <div class="detail-surface">
+        <header class="detail-header">
+          <div class="detail-heading-copy">
+            <p class="detail-kicker" id="detail-kicker">Session details</p>
+            <h2 id="detail-title">Session details</h2>
+          </div>
+          <button class="detail-close" id="detail-close" type="button">Close</button>
+        </header>
+        <p class="detail-description" id="detail-description"></p>
+        <div class="detail-content" id="detail-content"></div>
+      </div>
+    </dialog>
   </body>
 </html>
